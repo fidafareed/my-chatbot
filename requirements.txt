@@ -5,3 +5,5 @@ openai==1.10.0
 gunicorn==20.1.0
 
 setuptools
+setuptools>=65.5.0
+wheel>=0.40.0
