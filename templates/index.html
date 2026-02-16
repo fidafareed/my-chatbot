@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Simple LLM Chatbot</title>
+    <style>
+      body { font-family: Arial, sans-serif; max-width:800px; margin:40px auto; padding:0 16px; }
+      #messages { border:1px solid #ddd; padding:12px; min-height:200px; border-radius:6px; background:#f9f9f9; }
+      .msg { margin:8px 0; }
+      .user { text-align:right; color:#111; }
+      .bot { text-align:left; color:#045; }
+      textarea { width:100%; height:80px; }
+      button { padding:8px 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Simple LLM Chatbot</h1>
+    <div id="messages"></div>
+    <form id="chat-form">
+      <textarea id="message" placeholder="Say something..."></textarea>
+      <div style="margin-top:8px;">
+        <button type="submit">Send</button>
+      </div>
+    </form>
+
+    <script>
+      const form = document.getElementById('chat-form');
+      const messages = document.getElementById('messages');
+
+      function append(role, text) {
+        const d = document.createElement('div');
+        d.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+        d.textContent = (role === 'user' ? 'You: ' : 'Bot: ') + text;
+        messages.appendChild(d);
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('message');
+        const text = input.value.trim();
+        if (!text) return;
+        append('user', text);
+        input.value = '';
+        append('bot', '...thinking');
+        try {
+          const res = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text }),
+          });
+          const j = await res.json();
+          // remove the last '...thinking' bot message
+          const last = messages.querySelectorAll('.bot');
+          if (last.length) last[last.length - 1].remove();
+          if (j.reply) append('bot', j.reply);
+          else append('bot', 'Error: ' + (j.error || 'Unknown'));
+        } catch (err) {
+          append('bot', 'Network or server error');
+        }
+      });
+    </script>
+  </body>
+</html>
+

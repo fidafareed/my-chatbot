@@ -1,0 +1,17 @@
+# Ignore local environment and Python artifacts
+.env
+.venv/
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+dist/
+build/
+.DS_Store
+
+__pycache__/
+.env
+instance/
+venv/
+env/
+
