@@ -2,9 +2,6 @@ flask==2.2.5
 requests==2.31.0
 python-dotenv==1.0.0
 openai==1.10.0
-gunicorn==20.1.0
-
-setuptools
+waitress==2.1.2
 setuptools>=65.5.0
 wheel>=0.40.0
-waitress==2.1.2
