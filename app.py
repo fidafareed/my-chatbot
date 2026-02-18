@@ -192,10 +192,63 @@ def chat():
     except Exception:
         return jsonify({"error": "Upstream did not return JSON", "status": resp.status_code, "details": resp_text}), 502
 
-    # standard OpenAI chat response shape
-    try:
-        content = j["choices"][0]["message"]["content"]
-    except Exception:
+    # Attempt to extract text from multiple provider response shapes.
+    def _extract_content(resp_json):
+        # OpenAI Chat Completions (choices -> message -> content)
+        try:
+            return resp_json["choices"][0]["message"]["content"]
+        except Exception:
+            pass
+
+        # OpenAI older/text completion (choices -> text)
+        try:
+            return resp_json["choices"][0]["text"]
+        except Exception:
+            pass
+
+        # OpenAI "Responses" API style: output -> [ { content: [ { text: "..." } ] } ]
+        try:
+            out = resp_json.get("output") or resp_json.get("outputs")
+            if isinstance(out, list) and out:
+                first = out[0]
+                # content may be nested
+                if isinstance(first, dict):
+                    # content.text
+                    c = first.get("content") or first.get("content_type") or first.get("data")
+                    if isinstance(c, list) and c:
+                        # try common nested shapes
+                        maybe_text = c[0].get("text") if isinstance(c[0], dict) else None
+                        if maybe_text:
+                            return maybe_text
+                    # fallback to first.get("text")
+                    if first.get("text"):
+                        return first.get("text")
+        except Exception:
+            pass
+
+        # Anthropic / Claude older endpoint: "completion"
+        if isinstance(resp_json, dict) and "completion" in resp_json:
+            return resp_json.get("completion")
+
+        # Some Anthropic proxies return {"id":..., "model":..., "output": "text"} or {"text": "..."}
+        if isinstance(resp_json, dict) and "output" in resp_json and isinstance(resp_json["output"], str):
+            return resp_json["output"]
+        if isinstance(resp_json, dict) and "text" in resp_json:
+            return resp_json.get("text")
+
+        # Last resort: try to stringify top-level 'message' or first string value
+        if isinstance(resp_json, dict):
+            if "message" in resp_json and isinstance(resp_json["message"], str):
+                return resp_json["message"]
+            # scan for first simple string value
+            for v in resp_json.values():
+                if isinstance(v, str) and len(v) > 0:
+                    return v
+
+        return None
+
+    content = _extract_content(j)
+    if content is None:
         # return full JSON for easier debugging
         return jsonify({"error": "Unexpected response shape", "status": resp.status_code, "body": j}), 502
 
