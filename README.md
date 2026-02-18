@@ -17,6 +17,8 @@ Open http://localhost:5000 in your browser and try sending messages.
 Notes:
 - The app reads `OPENAI_API_KEY` from environment or `.env`.
 - This is intentionally minimal; feel free to extend conversation state, streaming, or authentication as needed.
+ - You can optionally configure Anthropic/Claude by setting `ANTHROPIC_API_KEY` in your `.env`.
+ - To choose which provider to use by default, set `DEFAULT_PROVIDER` to `openai` or `anthropic`. Individual requests can override the provider by passing `metadata: {"provider":"anthropic"}`.
  
 AgentCost / proxy integration
 --------------------------------

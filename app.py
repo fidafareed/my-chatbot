@@ -29,6 +29,11 @@ if AGENTCOST_HEADERS_RAW:
 app = Flask(__name__)
 
 SYSTEM_PROMPT = "You are a helpful assistant."
+# Anthropic / Claude config (optional)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-2")
+
 USE_OPENAI_SDK = os.getenv("USE_OPENAI_SDK", "1") in ("1", "true", "yes")
 OPENAI_SDK_CLIENT = None
 if USE_OPENAI_SDK:
@@ -88,6 +93,9 @@ def chat():
         header_name = "X-" + "-".join(part.capitalize() for part in k.split("_"))
         headers[header_name] = str(v)
 
+    # Decide provider: allow per-request override via metadata["provider"]
+    provider = (metadata.get("provider") or os.getenv("DEFAULT_PROVIDER", "openai") or "openai").lower()
+
     # build endpoint (if AGENTCOST_PROXY_URL already includes /v1 it's fine to append)
     endpoint = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
 
@@ -101,46 +109,71 @@ def chat():
         pass
 
     try:
-        # If there's per-request metadata headers or the SDK isn't available, use direct requests
-        if metadata or OPENAI_SDK_CLIENT is None:
-            resp = requests.post(endpoint, json=payload, headers=headers, timeout=30)
-        else:
-            # Use OpenAI SDK client when available for nicer integration with proxy
-            # The SDK returns a mapping-like object; convert to dict
-            sdk_resp = OPENAI_SDK_CLIENT.chat.completions.create(
-                model=payload["model"],
-                messages=payload["messages"],
-                temperature=payload.get("temperature"),
-                max_tokens=payload.get("max_tokens"),
-            )
-            # Try to extract content directly from SDK response (handles object or dict)
-            content = None
-            try:
-                # dict-like access
-                if isinstance(sdk_resp, dict):
-                    content = sdk_resp["choices"][0]["message"]["content"]
-                else:
-                    # object-style access (ChatCompletion)
-                    first = getattr(sdk_resp, "choices", None)
-                    if first:
-                        first_item = first[0]
-                        msg = getattr(first_item, "message", None) or getattr(first_item, "text", None)
-                        if msg is not None:
-                            # message may be object with content attribute or a dict
-                            if hasattr(msg, "content"):
-                                content = getattr(msg, "content")
-                            elif isinstance(msg, dict):
-                                content = msg.get("content")
-                            else:
-                                # fallback: string conversion
-                                content = str(msg)
-            except Exception:
-                content = None
+        # If Anthropic/Claude is requested and configured, call their API
+        if provider in ("anthropic", "claude"):
+            if not ANTHROPIC_API_KEY:
+                return jsonify({"error": "Anthropic provider requested but ANTHROPIC_API_KEY not set"}), 400
 
-            if content is not None:
-                return jsonify({"reply": content})
-            # fallback: serialize sdk_resp to string
-            return jsonify({"reply": str(sdk_resp)})
+            # Build a simple prompt from system + user for Claude-style models
+            anthropic_prompt = f"{SYSTEM_PROMPT}\n\nHuman: {user_message}\n\nAssistant:"
+            anthropic_base = os.getenv("ANTHROPIC_PROXY_URL") or ANTHROPIC_BASE_URL
+            anthropic_endpoint = anthropic_base.rstrip("/") + "/v1/complete"
+            anthropic_headers = {
+                "Authorization": f"Bearer {ANTHROPIC_API_KEY}",
+                "Content-Type": "application/json",
+            }
+            # merge agentcost/proxy headers if provided
+            anthropic_headers.update(AGENTCOST_HEADERS)
+
+            anthropic_payload = {
+                "model": metadata.get("anthropic_model") or ANTHROPIC_MODEL,
+                "prompt": anthropic_prompt,
+                "max_tokens_to_sample": payload.get("max_tokens", 500),
+                "temperature": payload.get("temperature", 0.7),
+            }
+
+            resp = requests.post(anthropic_endpoint, json=anthropic_payload, headers=anthropic_headers, timeout=30)
+        else:
+            # OpenAI path (existing behavior). Use SDK when available and no per-request metadata.
+            if metadata or OPENAI_SDK_CLIENT is None:
+                resp = requests.post(endpoint, json=payload, headers=headers, timeout=30)
+            else:
+                # Use OpenAI SDK client when available for nicer integration with proxy
+                # The SDK returns a mapping-like object; convert to dict
+                sdk_resp = OPENAI_SDK_CLIENT.chat.completions.create(
+                    model=payload["model"],
+                    messages=payload["messages"],
+                    temperature=payload.get("temperature"),
+                    max_tokens=payload.get("max_tokens"),
+                )
+                # Try to extract content directly from SDK response (handles object or dict)
+                content = None
+                try:
+                    # dict-like access
+                    if isinstance(sdk_resp, dict):
+                        content = sdk_resp["choices"][0]["message"]["content"]
+                    else:
+                        # object-style access (ChatCompletion)
+                        first = getattr(sdk_resp, "choices", None)
+                        if first:
+                            first_item = first[0]
+                            msg = getattr(first_item, "message", None) or getattr(first_item, "text", None)
+                            if msg is not None:
+                                # message may be object with content attribute or a dict
+                                if hasattr(msg, "content"):
+                                    content = getattr(msg, "content")
+                                elif isinstance(msg, dict):
+                                    content = msg.get("content")
+                                else:
+                                    # fallback: string conversion
+                                    content = str(msg)
+                except Exception:
+                    content = None
+
+                if content is not None:
+                    return jsonify({"reply": content})
+                # fallback: serialize sdk_resp to string
+                return jsonify({"reply": str(sdk_resp)})
     except Exception as e:
         print("[LLM proxy] request exception:", str(e))
         return jsonify({"error": "Request exception", "details": str(e)}), 500
