@@ -19,7 +19,12 @@
     <div id="messages"></div>
     <form id="chat-form">
       <textarea id="message" placeholder="Say something..."></textarea>
-      <div style="margin-top:8px;">
+      <div style="margin-top:8px; display:flex; gap:12px; align-items:center;">
+        <label for="provider">Provider:</label>
+        <select id="provider" name="provider">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+        </select>
         <button type="submit">Send</button>
       </div>
     </form>
@@ -48,7 +53,10 @@
           const res = await fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text }),
+            body: JSON.stringify({
+              message: text,
+              metadata: { provider: document.getElementById('provider').value },
+            }),
           });
           const j = await res.json();
           // remove the last '...thinking' bot message
