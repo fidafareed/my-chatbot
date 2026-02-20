@@ -25,6 +25,11 @@ if AGENTCOST_HEADERS_RAW:
         AGENTCOST_HEADERS = json.loads(AGENTCOST_HEADERS_RAW)
     except Exception:
         AGENTCOST_HEADERS = {}
+# If an AgentCost API key is provided separately, ensure it's included in the
+# headers we send to the proxy so both SDK and manual requests include it.
+AGENTCOST_API_KEY = os.getenv("AGENTCOST_API_KEY")
+if AGENTCOST_API_KEY:
+    AGENTCOST_HEADERS.setdefault("X-API-Key", AGENTCOST_API_KEY)
 
 app = Flask(__name__)
 
