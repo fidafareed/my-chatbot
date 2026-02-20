@@ -118,7 +118,10 @@ def chat():
             anthropic_prompt = f"{SYSTEM_PROMPT}\n\nHuman: {user_message}\n\nAssistant:"
             anthropic_base = os.getenv("ANTHROPIC_PROXY_URL") or ANTHROPIC_BASE_URL
             anthropic_endpoint = anthropic_base.rstrip("/") + "/v1/complete"
+            # Anthropic/Claude expects the API key in the `x-api-key` header.
+            # Keep a Bearer-style Authorization header as well for proxies that accept it.
             anthropic_headers = {
+                "x-api-key": ANTHROPIC_API_KEY,
                 "Authorization": f"Bearer {ANTHROPIC_API_KEY}",
                 "Content-Type": "application/json",
             }
