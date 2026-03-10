@@ -1,37 +1,15 @@
-# Simple LLM Chatbot
+# Simple Chatbot
 
-This is a minimal Flask-based chatbot that proxies requests to the OpenAI Chat Completions API using your OpenAI API key.
+Flask app that talks to OpenAI, Anthropic, Gemini, and xAI (Grok). Set `OPENAI_API_KEY` in `.env` (required). Optionally set `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and `XAI_API_KEY` to use those providers.
 
-Setup:
-1. Create and activate a Python virtual environment:
-   python3 -m venv venv
-   source venv/bin/activate
-2. Install dependencies:
-   pip install -r requirements.txt
-3. Copy `.env.example` to `.env` and set `OPENAI_API_KEY`.
-4. Run the app:
-   python app.py
+**Run from a fresh terminal:**
 
-Open http://localhost:5000 in your browser and try sending messages.
-
-Notes:
-- The app reads `OPENAI_API_KEY` from environment or `.env`.
-- This is intentionally minimal; feel free to extend conversation state, streaming, or authentication as needed.
- - You can optionally configure Anthropic/Claude by setting `ANTHROPIC_API_KEY` in your `.env`.
- - To choose which provider to use by default, set `DEFAULT_PROVIDER` to `openai` or `anthropic`. Individual requests can override the provider by passing `metadata: {"provider":"anthropic"}`.
- 
-AgentCost / proxy integration
---------------------------------
-If you want to route API calls through AgentCost (or any proxy) to capture cost and metadata, set these environment variables in your `.env`:
-
-- `AGENTCOST_PROXY_URL` — base URL for the proxy (example: `https://proxy.agentcost.dev/v1`). If unset the app will use OpenAI's `https://api.openai.com/v1`.
-- `AGENTCOST_HEADERS` — optional JSON object of extra HTTP headers to send with each request. Example:
-
-```text
-AGENTCOST_HEADERS={"X-Agent-Name":"my-agent","X-Customer-Id":"cust_123"}
+```bash
+cd /path/to/chatbot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
 ```
 
-With these set the app will send the same OpenAI request through the proxy so you get realtime cost tracking without changing call semantics.
-
-See https://agentcost-production.up.railway.app/ for AgentCost docs and proxy instructions.
-
+Then open **http://localhost:8080**. Copy `.env.example` to `.env` and add your API keys if you haven’t already. If port 8080 is in use, run `PORT=3000 python app.py` (or any free port).

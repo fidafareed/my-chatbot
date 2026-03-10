@@ -3,72 +3,163 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Simple LLM Chatbot</title>
+    <title>Simple Chatbot</title>
     <style>
-      body { font-family: Arial, sans-serif; max-width:800px; margin:40px auto; padding:0 16px; }
-      #messages { border:1px solid #ddd; padding:12px; min-height:200px; border-radius:6px; background:#f9f9f9; }
-      .msg { margin:8px 0; }
-      .user { text-align:right; color:#111; }
-      .bot { text-align:left; color:#045; }
-      textarea { width:100%; height:80px; }
-      button { padding:8px 12px; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; padding: 20px; }
+      .container { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; height: calc(100vh - 40px); }
+      h1 { margin: 0 0 12px; font-size: 1.25rem; }
+      #messages { flex: 1; overflow: auto; padding: 12px; background: #16213e; border-radius: 8px; margin-bottom: 12px; }
+      .msg { margin-bottom: 12px; }
+      .msg.user { color: #a5f3fc; }
+      .msg.bot { color: #cbd5e1; }
+      .composer { display: flex; gap: 8px; }
+      #message { flex: 1; min-height: 44px; padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #fff; font-size: 14px; resize: none; }
+      button { padding: 10px 16px; border-radius: 8px; border: none; background: #7c3aed; color: #fff; font-weight: 600; cursor: pointer; }
+      .sidebar { margin-bottom: 12px; max-height: 340px; overflow-y: auto; }
+      .model-item { display: inline-block; margin: 0 8px 8px 0; padding: 6px 10px; background: #334155; border-radius: 6px; cursor: pointer; font-size: 12px; }
+      .model-item:hover { background: #475569; }
+      .model-item.active { background: #7c3aed; }
+      .model-item.hide { display: none; }
+      .muted { font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+      .model-search { width: 100%; padding: 6px 8px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; font-size: 13px; }
     </style>
   </head>
   <body>
-    <h1>Simple LLM Chatbot</h1>
-    <div id="messages"></div>
-    <form id="chat-form">
-      <textarea id="message" placeholder="Say something..."></textarea>
-      <div style="margin-top:8px; display:flex; gap:12px; align-items:center;">
-        <label for="provider">Provider:</label>
-        <select id="provider" name="provider">
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Anthropic (Claude)</option>
-        </select>
-        <button type="submit">Send</button>
+    <div class="container">
+      <h1>Chat</h1>
+      <input type="text" class="model-search" id="model-search" placeholder="Search models..." />
+      <div class="sidebar">
+        <div class="muted">OpenAI</div>
+        <span class="model-item" data-provider="openai" data-model="gpt-5.2">GPT-5.2</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-5.2-pro">GPT-5.2 pro</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-5.1">GPT-5.1</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-5">GPT-5</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-5-pro">GPT-5 pro</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-5-mini">GPT-5 mini</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-5-nano">GPT-5 nano</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-4.1">GPT-4.1</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-4.1-mini">GPT-4.1 mini</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-4.1-nano">GPT-4.1 nano</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-4o">GPT-4o</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-4o-mini">GPT-4o mini</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-4-turbo">GPT-4 Turbo</span>
+        <span class="model-item" data-provider="openai" data-model="gpt-4">GPT-4</span>
+        <span class="model-item active" data-provider="openai" data-model="gpt-3.5-turbo">GPT-3.5 Turbo</span>
+        <span class="model-item" data-provider="openai" data-model="o3">o3</span>
+        <span class="model-item" data-provider="openai" data-model="o3-mini">o3-mini</span>
+        <span class="model-item" data-provider="openai" data-model="o3-pro">o3-pro</span>
+        <span class="model-item" data-provider="openai" data-model="o4-mini">o4-mini</span>
+        <span class="model-item" data-provider="openai" data-model="o1">o1</span>
+        <span class="model-item" data-provider="openai" data-model="o1-pro">o1-pro</span>
+        <div class="muted" style="margin-top:12px">Anthropic</div>
+        <span class="model-item" data-provider="anthropic" data-model="claude-opus-4-6">Claude Opus 4.6</span>
+        <span class="model-item" data-provider="anthropic" data-model="claude-sonnet-4-6">Claude Sonnet 4.6</span>
+        <span class="model-item" data-provider="anthropic" data-model="claude-haiku-4-5">Claude Haiku 4.5</span>
+        <span class="model-item" data-provider="anthropic" data-model="claude-sonnet-4-5">Claude Sonnet 4.5</span>
+        <span class="model-item" data-provider="anthropic" data-model="claude-opus-4-5">Claude Opus 4.5</span>
+        <span class="model-item" data-provider="anthropic" data-model="claude-opus-4-1">Claude Opus 4.1</span>
+        <span class="model-item" data-provider="anthropic" data-model="claude-sonnet-4-20250514">Claude Sonnet 4</span>
+        <span class="model-item" data-provider="anthropic" data-model="claude-opus-4-20250514">Claude Opus 4</span>
+        <span class="model-item" data-provider="anthropic" data-model="claude-3-haiku-20240307">Claude 3 Haiku</span>
+        <div class="muted" style="margin-top:12px">Gemini</div>
+        <span class="model-item" data-provider="gemini" data-model="gemini-2.5-flash">Gemini 2.5 Flash</span>
+        <span class="model-item" data-provider="gemini" data-model="gemini-2.5-pro">Gemini 2.5 Pro</span>
+        <span class="model-item" data-provider="gemini" data-model="gemini-2.0-flash-001">Gemini 2.0 Flash 001</span>
+        <span class="model-item" data-provider="gemini" data-model="gemini-2.0-flash-lite">Gemini 2.0 Flash-Lite</span>
+        <span class="model-item" data-provider="gemini" data-model="gemini-flash-latest">Gemini Flash Latest</span>
+        <span class="model-item" data-provider="gemini" data-model="gemini-pro-latest">Gemini Pro Latest</span>
+        <div class="muted" style="margin-top:12px">xAI (Grok)</div>
+        <span class="model-item" data-provider="xai" data-model="grok-4-1-fast-reasoning">Grok 4.1 Fast Reasoning</span>
+        <span class="model-item" data-provider="xai" data-model="grok-4-1-fast-non-reasoning">Grok 4.1 Fast Non-Reasoning</span>
+        <span class="model-item" data-provider="xai" data-model="grok-4-fast-reasoning">Grok 4 Fast Reasoning</span>
+        <span class="model-item" data-provider="xai" data-model="grok-4-fast-non-reasoning">Grok 4 Fast Non-Reasoning</span>
+        <span class="model-item" data-provider="xai" data-model="grok-4-0709">Grok 4</span>
+        <span class="model-item" data-provider="xai" data-model="grok-3">Grok 3</span>
+        <span class="model-item" data-provider="xai" data-model="grok-3-mini">Grok 3 Mini</span>
       </div>
-    </form>
-
+      <div id="messages"></div>
+      <form id="chat-form" class="composer">
+        <textarea id="message" placeholder="Message..." required></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </div>
     <script>
-      const form = document.getElementById('chat-form');
       const messages = document.getElementById('messages');
+      const form = document.getElementById('chat-form');
+      const msgInput = document.getElementById('message');
+      let provider = 'openai', model = 'gpt-3.5-turbo';
 
-      function append(role, text) {
-        const d = document.createElement('div');
-        d.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
-        d.textContent = (role === 'user' ? 'You: ' : 'Bot: ') + text;
-        messages.appendChild(d);
+      function appendMessage(who, text) {
+        const el = document.createElement('div');
+        el.className = 'msg ' + who;
+        el.textContent = (who === 'user' ? 'You: ' : '') + text;
+        messages.appendChild(el);
         messages.scrollTop = messages.scrollHeight;
       }
 
+      document.querySelectorAll('.model-item').forEach(item => {
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.model-item').forEach(i => i.classList.remove('active'));
+          item.classList.add('active');
+          provider = item.dataset.provider;
+          model = item.dataset.model;
+        });
+      });
+      document.getElementById('model-search').addEventListener('input', e => {
+        const q = e.target.value.toLowerCase().trim();
+        document.querySelectorAll('.model-item').forEach(el => {
+          const label = el.textContent.toLowerCase();
+          el.classList.toggle('hide', q && !label.includes(q));
+        });
+      });
+
+      msgInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+      });
+
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const input = document.getElementById('message');
-        const text = input.value.trim();
+        const text = msgInput.value.trim();
         if (!text) return;
-        append('user', text);
-        input.value = '';
-        append('bot', '...thinking');
+        appendMessage('user', text);
+        msgInput.value = '';
+        const placeholder = document.createElement('div');
+        placeholder.className = 'msg bot';
+        placeholder.textContent = '…';
+        messages.appendChild(placeholder);
+        messages.scrollTop = messages.scrollHeight;
         try {
           const res = await fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               message: text,
-              metadata: { provider: document.getElementById('provider').value },
+              metadata: {
+                provider,
+                openai_model: provider === 'openai' ? model : undefined,
+                anthropic_model: provider === 'anthropic' ? model : undefined,
+                gemini_model: provider === 'gemini' ? model : undefined,
+                xai_model: provider === 'xai' ? model : undefined,
+              },
             }),
           });
           const j = await res.json();
-          // remove the last '...thinking' bot message
-          const last = messages.querySelectorAll('.bot');
-          if (last.length) last[last.length - 1].remove();
-          if (j.reply) append('bot', j.reply);
-          else append('bot', 'Error: ' + (j.error || 'Unknown'));
+          placeholder.remove();
+          if (j.reply) {
+            appendMessage('bot', j.reply);
+          } else {
+            const parts = ['Error'];
+            if (j.error) parts.push(j.error);
+            if (j.status) parts.push('status ' + j.status);
+            if (j.details) parts.push(j.details);
+            appendMessage('bot', parts.join(': '));
+          }
         } catch (err) {
-          append('bot', 'Network or server error');
+          placeholder.remove();
+          appendMessage('bot', 'Network error');
         }
       });
     </script>
   </body>
 </html>
-

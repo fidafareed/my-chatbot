@@ -6,18 +6,27 @@ import json
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Create a requests session that ignores system proxy settings.
+# This avoids corporate/OS proxies that may block Railway/Spendline.
+session = requests.Session()
+session.trust_env = False
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("Set OPENAI_API_KEY in environment or .env file")
 
-# Optional: route OpenAI calls through an AgentCost (or other) proxy to capture
-# per-call billing/metadata. Set AGENTCOST_PROXY_URL to something like:
-#   https://proxy.agentcost.dev/v1
+# Optional: route OpenAI calls through Spendline (or AgentCost) proxy to capture
+# per-call billing/metadata. Set SPENDLINE_URL, or AGENTCOST_URL / AGENTCOST_PROXY_URL.
+# Example: https://agentcost-production.up.railway.app
 # If unset we default to the official OpenAI API base.
-AGENTCOST_PROXY_URL = os.getenv("AGENTCOST_PROXY_URL") or "https://api.openai.com/v1"
+AGENTCOST_URL_RAW = os.getenv("SPENDLINE_URL") or os.getenv("AGENTCOST_URL") or os.getenv("AGENTCOST_PROXY_URL") or ""
+if AGENTCOST_URL_RAW:
+    AGENTCOST_PROXY_URL = AGENTCOST_URL_RAW.rstrip("/") + "/v1" if not AGENTCOST_URL_RAW.endswith("/v1") else AGENTCOST_URL_RAW
+else:
+    AGENTCOST_PROXY_URL = "https://api.openai.com/v1"
 
 # Optional extra headers to send to the proxy / API. Provide a JSON object string:
-# AGENTCOST_HEADERS='{"X-Agent-Name":"my-agent","X-Customer-Id":"cust_123"}'
+AGENTCOST_HEADERS='{"X-Agent-Name":"my-agent","X-Customer-Id":"fida"}'
 AGENTCOST_HEADERS_RAW = os.getenv("AGENTCOST_HEADERS", "")
 AGENTCOST_HEADERS = {}
 if AGENTCOST_HEADERS_RAW:
@@ -25,19 +34,25 @@ if AGENTCOST_HEADERS_RAW:
         AGENTCOST_HEADERS = json.loads(AGENTCOST_HEADERS_RAW)
     except Exception:
         AGENTCOST_HEADERS = {}
-# If an AgentCost API key is provided separately, ensure it's included in the
-# headers we send to the proxy so both SDK and manual requests include it.
-AGENTCOST_API_KEY = os.getenv("AGENTCOST_API_KEY")
+# If a Spendline (or AgentCost) API key is provided, add it to proxy headers.
+AGENTCOST_API_KEY = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_KEY")
 if AGENTCOST_API_KEY:
     AGENTCOST_HEADERS.setdefault("X-API-Key", AGENTCOST_API_KEY)
+
+# Agent and customer IDs for request tracking
+AGENT_ID = os.getenv("AGENT_ID", "my-chatbot")
+CUSTOMER_ID = os.getenv("CUSTOMER_ID", "fida")
 
 app = Flask(__name__)
 
 SYSTEM_PROMPT = "You are a helpful assistant."
-# Anthropic / Claude config (optional)
+# Provider configs (all routed through AgentCost)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-2")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-sonnet-20240229")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
+XAI_MODEL = os.getenv("XAI_MODEL", "grok-beta")
 
 USE_OPENAI_SDK = os.getenv("USE_OPENAI_SDK", "1") in ("1", "true", "yes")
 OPENAI_SDK_CLIENT = None
@@ -47,10 +62,10 @@ if USE_OPENAI_SDK:
 
         # Build default headers for the SDK (AgentCost may require its own API key header)
         sdk_default_headers = AGENTCOST_HEADERS.copy()
-        # If the proxy expects an AgentCost API key header, support AGENTCOST_API_KEY env var
-        AGENTCOST_API_KEY = os.getenv("AGENTCOST_API_KEY")
-        if AGENTCOST_API_KEY:
-            sdk_default_headers.setdefault("X-API-Key", AGENTCOST_API_KEY)
+        # Proxy API key (SPENDLINE_API_KEY or AGENTCOST_API_KEY)
+        _proxy_key = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_KEY")
+        if _proxy_key:
+            sdk_default_headers.setdefault("X-API-Key", _proxy_key)
 
         OPENAI_SDK_CLIENT = OpenAI(
             api_key=OPENAI_API_KEY,
@@ -85,11 +100,12 @@ def chat():
     }
 
     headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json",
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "X-API-Key": AGENTCOST_API_KEY,
+        "x-agent-id": AGENT_ID,
+        "x-customer-id": CUSTOMER_ID,
     }
-    # merge any optional AgentCost / proxy headers
-    headers.update(AGENTCOST_HEADERS)
 
     # merge per-request metadata into X- headers (agent_name -> X-Agent-Name)
     for k, v in metadata.items():
@@ -114,37 +130,77 @@ def chat():
         pass
 
     try:
-        # If Anthropic/Claude is requested and configured, call their API
+        # Route all providers through AgentCost proxy
         if provider in ("anthropic", "claude"):
             if not ANTHROPIC_API_KEY:
                 return jsonify({"error": "Anthropic provider requested but ANTHROPIC_API_KEY not set"}), 400
 
-            # Build a simple prompt from system + user for Claude-style models
-            anthropic_prompt = f"{SYSTEM_PROMPT}\n\nHuman: {user_message}\n\nAssistant:"
-            anthropic_base = os.getenv("ANTHROPIC_PROXY_URL") or ANTHROPIC_BASE_URL
-            anthropic_endpoint = anthropic_base.rstrip("/") + "/v1/complete"
-            # Anthropic/Claude expects the API key in the `x-api-key` header.
-            # Keep a Bearer-style Authorization header as well for proxies that accept it.
-            anthropic_headers = {
-                "x-api-key": ANTHROPIC_API_KEY,
-                "Authorization": f"Bearer {ANTHROPIC_API_KEY}",
-                "Content-Type": "application/json",
-            }
-            # merge agentcost/proxy headers if provided
-            anthropic_headers.update(AGENTCOST_HEADERS)
-
+            # Anthropic-native path; avoid header collision: Spendline key in x-agentcost-key, Anthropic key in x-api-key
             anthropic_payload = {
                 "model": metadata.get("anthropic_model") or ANTHROPIC_MODEL,
-                "prompt": anthropic_prompt,
-                "max_tokens_to_sample": payload.get("max_tokens", 500),
-                "temperature": payload.get("temperature", 0.7),
+                "max_tokens": payload.get("max_tokens", 500),
+                "system": SYSTEM_PROMPT,
+                "messages": [{"role": "user", "content": user_message}],
             }
+            anthropic_headers = {
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01",
+                "x-api-key": ANTHROPIC_API_KEY,
+                "x-agent-id": AGENT_ID,
+                "x-customer-id": CUSTOMER_ID,
+            }
+            if AGENTCOST_API_KEY:
+                anthropic_headers["x-agentcost-key"] = AGENTCOST_API_KEY
+            endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/messages"
+            resp = session.post(endpoint_url, json=anthropic_payload, headers=anthropic_headers, timeout=30)
+            
+        elif provider == "gemini":
+            if not GEMINI_API_KEY:
+                return jsonify({"error": "Gemini provider requested but GEMINI_API_KEY not set"}), 400
 
-            resp = requests.post(anthropic_endpoint, json=anthropic_payload, headers=anthropic_headers, timeout=30)
+            # Same as curl: proxy infers provider from model name (e.g. gemini-2.0-flash)
+            gemini_payload = {
+                "model": metadata.get("gemini_model") or GEMINI_MODEL,
+                "messages": payload["messages"],
+                "temperature": payload.get("temperature", 0.7),
+                "max_tokens": payload.get("max_tokens", 500),
+            }
+            gemini_headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {GEMINI_API_KEY}",
+                "x-agent-id": AGENT_ID,
+                "x-customer-id": CUSTOMER_ID,
+            }
+            gemini_headers.update(AGENTCOST_HEADERS)
+            endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
+            resp = session.post(endpoint_url, json=gemini_payload, headers=gemini_headers, timeout=30)
+            
+        elif provider == "xai":
+            if not XAI_API_KEY:
+                return jsonify({"error": "xAI provider requested but XAI_API_KEY not set"}), 400
+            
+            # Same as curl: proxy infers provider from model name (e.g. grok-4-1-fast-reasoning)
+            xai_payload = {
+                "model": metadata.get("xai_model") or XAI_MODEL,
+                "messages": payload["messages"],
+                "temperature": payload.get("temperature", 0.7),
+                "max_tokens": payload.get("max_tokens", 500),
+            }
+            xai_headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {XAI_API_KEY}",
+                "x-agent-id": AGENT_ID,
+                "x-customer-id": CUSTOMER_ID,
+            }
+            xai_headers.update(AGENTCOST_HEADERS)
+            
+            endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
+            resp = session.post(endpoint_url, json=xai_payload, headers=xai_headers, timeout=30)
+            
         else:
-            # OpenAI path (existing behavior). Use SDK when available and no per-request metadata.
+            # Default to OpenAI. Use SDK when available and no per-request metadata.
             if metadata or OPENAI_SDK_CLIENT is None:
-                resp = requests.post(endpoint, json=payload, headers=headers, timeout=30)
+                resp = session.post(endpoint, json=payload, headers=headers, timeout=30)
             else:
                 # Use OpenAI SDK client when available for nicer integration with proxy
                 # The SDK returns a mapping-like object; convert to dict
@@ -200,8 +256,29 @@ def chat():
     except Exception:
         return jsonify({"error": "Upstream did not return JSON", "status": resp.status_code, "details": resp_text}), 502
 
+    # Surface proxy/auth errors (401, 403, 5xx) so the user sees the real message
+    if resp.status_code >= 400:
+        err_msg = None
+        if isinstance(j.get("error"), dict):
+            err_msg = j["error"].get("message") or j["error"].get("code") or str(j["error"])
+        elif isinstance(j.get("error"), str):
+            err_msg = j["error"]
+        if not err_msg:
+            err_msg = resp_text[:500] if resp_text else f"Upstream returned {resp.status_code}"
+        return jsonify({"error": err_msg, "status": resp.status_code}), resp.status_code if resp.status_code < 500 else 502
+
     # Attempt to extract text from multiple provider response shapes.
     def _extract_content(resp_json):
+        # Anthropic Messages API: content -> [ { type, text } ]
+        try:
+            blocks = resp_json.get("content") or []
+            if isinstance(blocks, list) and blocks:
+                for b in blocks:
+                    if isinstance(b, dict) and b.get("type") == "text" and "text" in b:
+                        return b["text"]
+        except Exception:
+            pass
+
         # OpenAI Chat Completions (choices -> message -> content)
         try:
             return resp_json["choices"][0]["message"]["content"]
