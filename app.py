@@ -17,7 +17,7 @@ if not OPENAI_API_KEY:
 
 # Optional: route OpenAI calls through Spendline (or AgentCost) proxy to capture
 # per-call billing/metadata. Set SPENDLINE_URL, or AGENTCOST_URL / AGENTCOST_PROXY_URL.
-# Example: https://agentcost-production.up.railway.app
+# Example: https://www.spendline.ai
 # If unset we default to the official OpenAI API base.
 AGENTCOST_URL_RAW = os.getenv("SPENDLINE_URL") or os.getenv("AGENTCOST_URL") or os.getenv("AGENTCOST_PROXY_URL") or ""
 if AGENTCOST_URL_RAW:
@@ -39,9 +39,8 @@ AGENTCOST_API_KEY = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_K
 if AGENTCOST_API_KEY:
     AGENTCOST_HEADERS.setdefault("X-API-Key", AGENTCOST_API_KEY)
 
-# Agent and customer IDs for request tracking
+# Agent ID for request tracking
 AGENT_ID = os.getenv("AGENT_ID", "my-chatbot")
-CUSTOMER_ID = os.getenv("CUSTOMER_ID", "fida")
 
 app = Flask(__name__)
 
@@ -104,7 +103,6 @@ def chat():
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "X-API-Key": AGENTCOST_API_KEY,
         "x-agent-id": AGENT_ID,
-        "x-customer-id": CUSTOMER_ID,
     }
 
     # merge per-request metadata into X- headers (agent_name -> X-Agent-Name)
@@ -147,7 +145,6 @@ def chat():
                 "anthropic-version": "2023-06-01",
                 "x-api-key": ANTHROPIC_API_KEY,
                 "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
             }
             if AGENTCOST_API_KEY:
                 anthropic_headers["x-agentcost-key"] = AGENTCOST_API_KEY
@@ -169,7 +166,6 @@ def chat():
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {GEMINI_API_KEY}",
                 "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
             }
             gemini_headers.update(AGENTCOST_HEADERS)
             endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
@@ -190,7 +186,6 @@ def chat():
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {XAI_API_KEY}",
                 "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
             }
             xai_headers.update(AGENTCOST_HEADERS)
             
