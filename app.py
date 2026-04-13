@@ -37,12 +37,13 @@ if AGENTCOST_HEADERS_RAW:
 # If a Spendline (or AgentCost) API key is provided, add it to proxy headers.
 AGENTCOST_API_KEY = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_KEY")
 if AGENTCOST_API_KEY:
-    AGENTCOST_HEADERS.setdefault("X-API-Key", AGENTCOST_API_KEY)
+    AGENTCOST_HEADERS.setdefault("x-spendline-key", AGENTCOST_API_KEY)
 
 # Tracking IDs for Spendline attribution
 AGENT_ID = os.getenv("AGENT_ID", "fida-chatbot")
 CUSTOMER_ID = os.getenv("CUSTOMER_ID", "fida")
 COST_CENTER = os.getenv("COST_CENTER", "engineering")
+SPENDLINE_TAGS = json.dumps({"cost_center": COST_CENTER})
 
 app = Flask(__name__)
 
@@ -66,7 +67,7 @@ if USE_OPENAI_SDK:
         # Proxy API key (SPENDLINE_API_KEY or AGENTCOST_API_KEY)
         _proxy_key = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_KEY")
         if _proxy_key:
-            sdk_default_headers.setdefault("X-API-Key", _proxy_key)
+            sdk_default_headers.setdefault("x-spendline-key", _proxy_key)
 
         OPENAI_SDK_CLIENT = OpenAI(
             api_key=OPENAI_API_KEY,
@@ -103,10 +104,10 @@ def chat():
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "X-API-Key": AGENTCOST_API_KEY,
+        "x-spendline-key": AGENTCOST_API_KEY,
         "x-agent-id": AGENT_ID,
         "x-customer-id": CUSTOMER_ID,
-        "x-cost-center": COST_CENTER,
+        "x-spendline-tags": SPENDLINE_TAGS,
     }
 
     # merge per-request metadata into X- headers (agent_name -> X-Agent-Name)
@@ -137,7 +138,7 @@ def chat():
             if not ANTHROPIC_API_KEY:
                 return jsonify({"error": "Anthropic provider requested but ANTHROPIC_API_KEY not set"}), 400
 
-            # Anthropic-native path; avoid header collision: Spendline key in x-agentcost-key, Anthropic key in x-api-key
+            # Anthropic-native path; Spendline key in x-spendline-key, Anthropic key in x-api-key
             anthropic_payload = {
                 "model": metadata.get("anthropic_model") or ANTHROPIC_MODEL,
                 "max_tokens": payload.get("max_tokens", 500),
@@ -148,12 +149,12 @@ def chat():
                 "Content-Type": "application/json",
                 "anthropic-version": "2023-06-01",
                 "x-api-key": ANTHROPIC_API_KEY,
+                "x-spendline-key": AGENTCOST_API_KEY,
                 "x-agent-id": AGENT_ID,
                 "x-customer-id": CUSTOMER_ID,
-                "x-cost-center": COST_CENTER,
+                "x-spendline-tags": SPENDLINE_TAGS,
             }
-            if AGENTCOST_API_KEY:
-                anthropic_headers["x-agentcost-key"] = AGENTCOST_API_KEY
+            
             endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/messages"
             resp = session.post(endpoint_url, json=anthropic_payload, headers=anthropic_headers, timeout=30)
             
@@ -171,9 +172,10 @@ def chat():
             gemini_headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {GEMINI_API_KEY}",
+                "x-spendline-key": AGENTCOST_API_KEY,
                 "x-agent-id": AGENT_ID,
                 "x-customer-id": CUSTOMER_ID,
-                "x-cost-center": COST_CENTER,
+                "x-spendline-tags": SPENDLINE_TAGS,
             }
             gemini_headers.update(AGENTCOST_HEADERS)
             endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
@@ -193,9 +195,10 @@ def chat():
             xai_headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {XAI_API_KEY}",
+                "x-spendline-key": AGENTCOST_API_KEY,
                 "x-agent-id": AGENT_ID,
                 "x-customer-id": CUSTOMER_ID,
-                "x-cost-center": COST_CENTER,
+                "x-spendline-tags": SPENDLINE_TAGS,
             }
             xai_headers.update(AGENTCOST_HEADERS)
             
