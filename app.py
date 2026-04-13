@@ -39,8 +39,10 @@ AGENTCOST_API_KEY = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_K
 if AGENTCOST_API_KEY:
     AGENTCOST_HEADERS.setdefault("X-API-Key", AGENTCOST_API_KEY)
 
-# Agent ID for request tracking
-AGENT_ID = os.getenv("AGENT_ID", "my-chatbot")
+# Tracking IDs for Spendline attribution
+AGENT_ID = os.getenv("AGENT_ID", "fida-chatbot")
+CUSTOMER_ID = os.getenv("CUSTOMER_ID", "fida")
+COST_CENTER = os.getenv("COST_CENTER", "engineering")
 
 app = Flask(__name__)
 
@@ -103,6 +105,8 @@ def chat():
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "X-API-Key": AGENTCOST_API_KEY,
         "x-agent-id": AGENT_ID,
+        "x-customer-id": CUSTOMER_ID,
+        "x-cost-center": COST_CENTER,
     }
 
     # merge per-request metadata into X- headers (agent_name -> X-Agent-Name)
@@ -145,6 +149,8 @@ def chat():
                 "anthropic-version": "2023-06-01",
                 "x-api-key": ANTHROPIC_API_KEY,
                 "x-agent-id": AGENT_ID,
+                "x-customer-id": CUSTOMER_ID,
+                "x-cost-center": COST_CENTER,
             }
             if AGENTCOST_API_KEY:
                 anthropic_headers["x-agentcost-key"] = AGENTCOST_API_KEY
@@ -166,6 +172,8 @@ def chat():
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {GEMINI_API_KEY}",
                 "x-agent-id": AGENT_ID,
+                "x-customer-id": CUSTOMER_ID,
+                "x-cost-center": COST_CENTER,
             }
             gemini_headers.update(AGENTCOST_HEADERS)
             endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
@@ -186,6 +194,8 @@ def chat():
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {XAI_API_KEY}",
                 "x-agent-id": AGENT_ID,
+                "x-customer-id": CUSTOMER_ID,
+                "x-cost-center": COST_CENTER,
             }
             xai_headers.update(AGENTCOST_HEADERS)
             
