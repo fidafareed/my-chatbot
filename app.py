@@ -39,11 +39,11 @@ AGENTCOST_API_KEY = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_K
 if AGENTCOST_API_KEY:
     AGENTCOST_HEADERS.setdefault("x-spendline-key", AGENTCOST_API_KEY)
 
-# Tracking IDs for Spendline attribution
-AGENT_ID = os.getenv("AGENT_ID", "fida-chatbot")
-CUSTOMER_ID = os.getenv("CUSTOMER_ID", "fida")
-COST_CENTER = os.getenv("COST_CENTER", "engineering")
-SPENDLINE_TAGS = json.dumps({"cost_center": COST_CENTER})
+# Tracking IDs for Spendline attribution (disabled – no Railway vars set)
+# AGENT_ID = os.getenv("AGENT_ID", "fida-chatbot")
+# CUSTOMER_ID = os.getenv("CUSTOMER_ID", "fida")
+# COST_CENTER = os.getenv("COST_CENTER", "engineering")
+# SPENDLINE_TAGS = json.dumps({"cost_center": COST_CENTER})
 
 app = Flask(__name__)
 
@@ -105,9 +105,9 @@ def chat():
         "Content-Type": "application/json",
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "x-spendline-key": AGENTCOST_API_KEY,
-        "x-agent-id": AGENT_ID,
-        "x-customer-id": CUSTOMER_ID,
-        "x-spendline-tags": SPENDLINE_TAGS,
+        # "x-agent-id": AGENT_ID,
+        # "x-customer-id": CUSTOMER_ID,
+        # "x-spendline-tags": SPENDLINE_TAGS,
     }
 
     # merge per-request metadata into X- headers (agent_name -> X-Agent-Name)
@@ -150,9 +150,9 @@ def chat():
                 "anthropic-version": "2023-06-01",
                 "x-api-key": ANTHROPIC_API_KEY,
                 "x-spendline-key": AGENTCOST_API_KEY,
-                "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
-                "x-spendline-tags": SPENDLINE_TAGS,
+                # "x-agent-id": AGENT_ID,
+                # "x-customer-id": CUSTOMER_ID,
+                # "x-spendline-tags": SPENDLINE_TAGS,
             }
             
             endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/messages"
@@ -173,9 +173,9 @@ def chat():
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {GEMINI_API_KEY}",
                 "x-spendline-key": AGENTCOST_API_KEY,
-                "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
-                "x-spendline-tags": SPENDLINE_TAGS,
+                # "x-agent-id": AGENT_ID,
+                # "x-customer-id": CUSTOMER_ID,
+                # "x-spendline-tags": SPENDLINE_TAGS,
             }
             gemini_headers.update(AGENTCOST_HEADERS)
             endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
@@ -196,9 +196,9 @@ def chat():
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {XAI_API_KEY}",
                 "x-spendline-key": AGENTCOST_API_KEY,
-                "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
-                "x-spendline-tags": SPENDLINE_TAGS,
+                # "x-agent-id": AGENT_ID,
+                # "x-customer-id": CUSTOMER_ID,
+                # "x-spendline-tags": SPENDLINE_TAGS,
             }
             xai_headers.update(AGENTCOST_HEADERS)
             
