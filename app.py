@@ -50,11 +50,11 @@ app = Flask(__name__)
 SYSTEM_PROMPT = "You are a helpful assistant."
 # Provider configs (all routed through AgentCost)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-sonnet-20240229")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
-XAI_MODEL = os.getenv("XAI_MODEL", "grok-beta")
+XAI_MODEL = os.getenv("XAI_MODEL", "grok-4.20-reasoning")
 
 USE_OPENAI_SDK = os.getenv("USE_OPENAI_SDK", "1") in ("1", "true", "yes")
 OPENAI_SDK_CLIENT = None
@@ -92,7 +92,7 @@ def chat():
         return jsonify({"error": "No message provided"}), 400
 
     payload = {
-        "model": "gpt-3.5-turbo",
+        "model": metadata.get("openai_model") or os.getenv("OPENAI_MODEL", "gpt-4.1"),
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
