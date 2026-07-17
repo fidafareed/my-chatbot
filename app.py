@@ -15,35 +15,64 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("Set OPENAI_API_KEY in environment or .env file")
 
-# Optional: route OpenAI calls through Spendline (or AgentCost) proxy to capture
-# per-call billing/metadata. Set SPENDLINE_URL, or AGENTCOST_URL / AGENTCOST_PROXY_URL.
-# Example: https://www.spendline.ai
-# If unset we default to the official OpenAI API base.
-AGENTCOST_URL_RAW = os.getenv("SPENDLINE_URL") or os.getenv("AGENTCOST_URL") or os.getenv("AGENTCOST_PROXY_URL") or ""
-if AGENTCOST_URL_RAW:
-    AGENTCOST_PROXY_URL = AGENTCOST_URL_RAW.rstrip("/") + "/v1" if not AGENTCOST_URL_RAW.endswith("/v1") else AGENTCOST_URL_RAW
+# Spendline: OpenAI-compatible proxy. Provider key stays in Authorization (or
+# x-api-key for Anthropic). Spendline tenant auth is x-spendline-key only — never
+# put the Spendline key in Authorization.
+SPENDLINE_API_KEY = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_KEY")
+SPENDLINE_URL_RAW = os.getenv("SPENDLINE_URL") or os.getenv("AGENTCOST_URL") or os.getenv("AGENTCOST_PROXY_URL") or ""
+if SPENDLINE_URL_RAW:
+    SPENDLINE_BASE_URL = SPENDLINE_URL_RAW.rstrip("/")
+    if not SPENDLINE_BASE_URL.endswith("/v1"):
+        SPENDLINE_BASE_URL += "/v1"
+elif SPENDLINE_API_KEY:
+    SPENDLINE_BASE_URL = "https://www.spendline.ai/v1"
 else:
-    AGENTCOST_PROXY_URL = "https://api.openai.com/v1"
+    SPENDLINE_BASE_URL = "https://api.openai.com/v1"
 
-# Optional extra headers to send to the proxy / API. Provide a JSON object string:
-AGENTCOST_HEADERS='{"X-Agent-Name":"my-agent","X-Customer-Id":"fida"}'
-AGENTCOST_HEADERS_RAW = os.getenv("AGENTCOST_HEADERS", "")
-AGENTCOST_HEADERS = {}
-if AGENTCOST_HEADERS_RAW:
+if SPENDLINE_URL_RAW and not SPENDLINE_API_KEY:
+    raise RuntimeError("SPENDLINE_URL is set but SPENDLINE_API_KEY is missing in .env")
+
+# Optional extra proxy headers (JSON object string).
+SPENDLINE_EXTRA_HEADERS = {}
+_extra_headers_raw = os.getenv("SPENDLINE_HEADERS") or os.getenv("AGENTCOST_HEADERS") or ""
+if _extra_headers_raw:
     try:
-        AGENTCOST_HEADERS = json.loads(AGENTCOST_HEADERS_RAW)
+        SPENDLINE_EXTRA_HEADERS = json.loads(_extra_headers_raw)
     except Exception:
-        AGENTCOST_HEADERS = {}
-# If a Spendline (or AgentCost) API key is provided, add it to proxy headers.
-AGENTCOST_API_KEY = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_KEY")
-if AGENTCOST_API_KEY:
-    AGENTCOST_HEADERS.setdefault("x-spendline-key", AGENTCOST_API_KEY)
+        SPENDLINE_EXTRA_HEADERS = {}
 
-# Tracking IDs for Spendline attribution (disabled – no Railway vars set)
-AGENT_ID = os.getenv("AGENT_ID", "fida-chatbot")
-CUSTOMER_ID = os.getenv("CUSTOMER_ID", "fida12")
+AGENT_ID = os.getenv("AGENT_ID", "support-bot-v2")
+CUSTOMER_ID = os.getenv("CUSTOMER_ID", "acme-corp")
 COST_CENTER = os.getenv("COST_CENTER", "engineering")
 SPENDLINE_TAGS = json.dumps({"cost_center": COST_CENTER})
+
+
+def spendline_headers(provider_headers):
+    """Provider auth in provider_headers; Spendline tenant auth via x-spendline-key."""
+    headers = dict(provider_headers)
+    if SPENDLINE_API_KEY:
+        headers["x-spendline-key"] = SPENDLINE_API_KEY
+    headers["x-agent-id"] = AGENT_ID
+    headers["x-customer-id"] = CUSTOMER_ID
+    headers["x-spendline-tags"] = SPENDLINE_TAGS
+    headers.update(SPENDLINE_EXTRA_HEADERS)
+    return headers
+
+
+def apply_metadata_headers(headers, metadata):
+    for k, v in (metadata or {}).items():
+        if v is None:
+            continue
+        header_name = "X-" + "-".join(part.capitalize() for part in k.split("_"))
+        headers[header_name] = str(v)
+    return headers
+
+
+def log_spendline_response(resp):
+    logged = resp.headers.get("x-spendline-logged")
+    print(f"[LLM proxy] x-spendline-logged: {logged}")
+    if SPENDLINE_API_KEY and logged != "true":
+        print("[LLM proxy] WARNING: Spendline did not confirm this call was logged to your dashboard")
 
 app = Flask(__name__)
 
@@ -62,17 +91,12 @@ if USE_OPENAI_SDK:
     try:
         from openai import OpenAI
 
-        # Build default headers for the SDK (AgentCost may require its own API key header)
-        sdk_default_headers = AGENTCOST_HEADERS.copy()
-        # Proxy API key (SPENDLINE_API_KEY or AGENTCOST_API_KEY)
-        _proxy_key = os.getenv("SPENDLINE_API_KEY") or os.getenv("AGENTCOST_API_KEY")
-        if _proxy_key:
-            sdk_default_headers.setdefault("x-spendline-key", _proxy_key)
+        sdk_default_headers = spendline_headers({})
 
         OPENAI_SDK_CLIENT = OpenAI(
             api_key=OPENAI_API_KEY,
-            base_url=AGENTCOST_PROXY_URL.rstrip("/"),
-            default_headers=sdk_default_headers or None,
+            base_url=SPENDLINE_BASE_URL,
+            default_headers=sdk_default_headers,
         )
     except Exception:
         OPENAI_SDK_CLIENT = None
@@ -81,6 +105,34 @@ if USE_OPENAI_SDK:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/spendline/verify")
+def spendline_verify():
+    """Confirm Spendline is receiving and recording calls for this API key."""
+    if not SPENDLINE_API_KEY:
+        return jsonify({"ok": False, "error": "SPENDLINE_API_KEY is not set"}), 400
+
+    try:
+        verify_headers = spendline_headers({"Content-Type": "application/json"})
+        calls_resp = session.get(
+            SPENDLINE_BASE_URL.rstrip("/").removesuffix("/v1") + "/api/calls?limit=3",
+            headers=verify_headers,
+            timeout=15,
+        )
+        calls_resp.raise_for_status()
+        calls = calls_resp.json().get("calls", [])
+        return jsonify({
+            "ok": True,
+            "proxy_url": SPENDLINE_BASE_URL,
+            "agent_id": AGENT_ID,
+            "customer_id": CUSTOMER_ID,
+            "recent_calls": len(calls),
+            "latest_call": calls[0] if calls else None,
+            "dashboard_url": "https://www.spendline.ai/dashboard",
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 
 @app.route("/chat", methods=["POST"])
@@ -101,31 +153,20 @@ def chat():
         "max_tokens": 500,
     }
 
-    headers = {
+    headers = apply_metadata_headers(spendline_headers({
         "Content-Type": "application/json",
         "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "x-spendline-key": AGENTCOST_API_KEY,
-        "x-agent-id": AGENT_ID,
-        "x-customer-id": CUSTOMER_ID,
-        "x-spendline-tags": SPENDLINE_TAGS,
-    }
-
-    # merge per-request metadata into X- headers (agent_name -> X-Agent-Name)
-    for k, v in metadata.items():
-        if v is None:
-            continue
-        header_name = "X-" + "-".join(part.capitalize() for part in k.split("_"))
-        headers[header_name] = str(v)
+    }), metadata)
 
     # Decide provider: allow per-request override via metadata["provider"]
     provider = (metadata.get("provider") or os.getenv("DEFAULT_PROVIDER", "openai") or "openai").lower()
 
-    # build endpoint (if AGENTCOST_PROXY_URL already includes /v1 it's fine to append)
-    endpoint = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
+    endpoint = SPENDLINE_BASE_URL.rstrip("/") + "/chat/completions"
 
     # Debug logging (prints to Flask console)
     try:
-        safe_headers = {hk: ("REDACTED" if hk.lower() == "authorization" else hv) for hk, hv in headers.items()}
+        _redact = {"authorization", "x-api-key", "x-spendline-key"}
+        safe_headers = {hk: ("REDACTED" if hk.lower() in _redact else hv) for hk, hv in headers.items()}
         print("[LLM proxy] endpoint:", endpoint)
         print("[LLM proxy] headers:", safe_headers)
         print("[LLM proxy] payload:", json.dumps(payload))
@@ -145,17 +186,13 @@ def chat():
                 "system": SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": user_message}],
             }
-            anthropic_headers = {
+            anthropic_headers = apply_metadata_headers(spendline_headers({
                 "Content-Type": "application/json",
                 "anthropic-version": "2023-06-01",
                 "x-api-key": ANTHROPIC_API_KEY,
-                "x-spendline-key": AGENTCOST_API_KEY,
-                "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
-                "x-spendline-tags": SPENDLINE_TAGS,
-            }
-            
-            endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/messages"
+            }), metadata)
+
+            endpoint_url = SPENDLINE_BASE_URL.rstrip("/") + "/messages"
             resp = session.post(endpoint_url, json=anthropic_payload, headers=anthropic_headers, timeout=30)
             
         elif provider == "gemini":
@@ -169,16 +206,11 @@ def chat():
                 "temperature": payload.get("temperature", 0.7),
                 "max_tokens": payload.get("max_tokens", 500),
             }
-            gemini_headers = {
+            gemini_headers = apply_metadata_headers(spendline_headers({
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {GEMINI_API_KEY}",
-                "x-spendline-key": AGENTCOST_API_KEY,
-                "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
-                "x-spendline-tags": SPENDLINE_TAGS,
-            }
-            gemini_headers.update(AGENTCOST_HEADERS)
-            endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
+            }), metadata)
+            endpoint_url = SPENDLINE_BASE_URL.rstrip("/") + "/chat/completions"
             resp = session.post(endpoint_url, json=gemini_payload, headers=gemini_headers, timeout=30)
             
         elif provider == "xai":
@@ -192,17 +224,12 @@ def chat():
                 "temperature": payload.get("temperature", 0.7),
                 "max_tokens": payload.get("max_tokens", 500),
             }
-            xai_headers = {
+            xai_headers = apply_metadata_headers(spendline_headers({
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {XAI_API_KEY}",
-                "x-spendline-key": AGENTCOST_API_KEY,
-                "x-agent-id": AGENT_ID,
-                "x-customer-id": CUSTOMER_ID,
-                "x-spendline-tags": SPENDLINE_TAGS,
-            }
-            xai_headers.update(AGENTCOST_HEADERS)
-            
-            endpoint_url = AGENTCOST_PROXY_URL.rstrip("/") + "/chat/completions"
+            }), metadata)
+
+            endpoint_url = SPENDLINE_BASE_URL.rstrip("/") + "/chat/completions"
             resp = session.post(endpoint_url, json=xai_payload, headers=xai_headers, timeout=30)
             
         else:
@@ -256,6 +283,7 @@ def chat():
     except Exception:
         resp_text = "<unreadable response body>"
     print(f"[LLM proxy] response status: {resp.status_code}")
+    log_spendline_response(resp)
     print(f"[LLM proxy] response body: {resp_text}")
 
     # Attempt to parse JSON reply
@@ -349,5 +377,9 @@ def chat():
 
 
 if __name__ == "__main__":
+    if SPENDLINE_API_KEY:
+        print(f"[Spendline] proxy={SPENDLINE_BASE_URL} agent={AGENT_ID} customer={CUSTOMER_ID}")
+    else:
+        print("[Spendline] WARNING: SPENDLINE_API_KEY not set — calls will not appear in dashboard")
     app.run(debug=True, port=int(os.getenv("PORT", 5000)))
 
